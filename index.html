@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Tự động chụp và gửi ảnh</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            background: #0b1120;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 16px;
+        }
+        .container {
+            background: #1e293b;
+            border-radius: 32px;
+            padding: 24px;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 20px 30px rgba(0,0,0,0.3);
+        }
+        video {
+            width: 100%;
+            border-radius: 24px;
+            transform: scaleX(-1); /* gương tự nhiên cho camera trước */
+            background: black;
+            margin: 16px 0;
+        }
+        .status {
+            background: #0f172a;
+            padding: 12px;
+            border-radius: 20px;
+            margin-top: 16px;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>📸 Đang khởi tạo camera...</h2>
+    <video id="video" autoplay playsinline muted></video>
+    <div class="status" id="status">🟡 Đang yêu cầu quyền camera...</div>
+</div>
+
+<script>
+    // 👇 THAY URL NÀY BẰNG LINK GOOGLE APPS SCRIPT CỦA BẠN
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxX4858iJkSutTVrZ1ucYZtZoIpHLxXjHLEwr9Sp6A/dev";
+
+    const video = document.getElementById('video');
+    const statusDiv = document.getElementById('status');
+    let stream = null;
+    let captured = false;
+
+    async function initCamera() {
+        try {
+            // Yêu cầu camera trước (không dùng exact để tránh lỗi nếu không có)
+            const constraints = {
+                video: { facingMode: "user" },
+                audio: false
+            };
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+
+            // Chờ video load xong
+            await new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    resolve();
+                };
+            });
+
+            statusDiv.innerHTML = "✅ Camera đã sẵn sàng. Tiến hành chụp ảnh...";
+            captureAndSend();
+        } catch (err) {
+            console.error("Lỗi camera:", err);
+            statusDiv.innerHTML = "❌ Không thể truy cập camera. Hãy kiểm tra quyền và thử lại.";
+        }
+    }
+
+    function captureAndSend() {
+        if (captured) return;
+        captured = true;
+
+        // Tạo canvas đúng kích thước video
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        const ctx = canvas.getContext('2d');
+        // Vẽ hình từ video (CSS đã lật ngang nên ảnh ra đúng chiều)
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Lấy ảnh base64
+        const imageData = canvas.toDataURL('image/jpeg', 0.9);
+        const timestamp = new Date().toISOString();
+
+        statusDiv.innerHTML = "📤 Đang gửi ảnh đến máy chủ...";
+
+        const formData = new FormData();
+        formData.append('imageData', imageData);
+        formData.append('timestamp', timestamp);
+
+        fetch(SCRIPT_URL, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.text())
+        .then(result => {
+            if (result === "OK") {
+                statusDiv.innerHTML = "✅ Đã chụp và gửi ảnh thành công! Cảm ơn bạn.";
+            } else {
+                statusDiv.innerHTML = "⚠️ Gửi ảnh thất bại. Phản hồi từ máy chủ: " + result;
+            }
+            // Tắt camera
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        })
+        .catch(error => {
+            console.error("Lỗi fetch:", error);
+            statusDiv.innerHTML = "❌ Lỗi kết nối. Không thể gửi ảnh.";
+        });
+    }
+
+    initCamera();
+</script>
+</body>
+</html>
